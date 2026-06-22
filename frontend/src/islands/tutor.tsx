@@ -97,7 +97,7 @@ function ChatPanel({ code }: { code: string }) {
     } catch (e) {}
   }
 
-  function handleSend() {
+  async function handleSend() {
     const text = input.trim()
     if (!text) return
     pushMessage('user', text)

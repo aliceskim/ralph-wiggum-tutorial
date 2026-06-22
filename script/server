@@ -25,8 +25,15 @@ echo ""
 (cd frontend && npm run dev) &
 VITE_PID=$!
 
-flask run --host=0.0.0.0 --port=5000 &
-FLASK_PID=$!
+# If a virtualenv exists in the workspace, prefer its python to run Flask
+if [ -d ".venv" ] && [ -x ".venv/bin/python" ]; then
+    echo "Using virtualenv python at .venv/bin/python to run Flask"
+    .venv/bin/python -m flask run --host=0.0.0.0 --port=5000 &
+    FLASK_PID=$!
+else
+    flask run --host=0.0.0.0 --port=5000 &
+    FLASK_PID=$!
+fi
 
 # Handle shutdown gracefully
 trap "kill $VITE_PID $FLASK_PID 2>/dev/null" EXIT
