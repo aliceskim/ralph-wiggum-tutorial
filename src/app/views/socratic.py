@@ -73,8 +73,8 @@ def socratic_api():  # type: ignore[no-untyped-def]
         messages.append({"role": role, "content": text})
 
     # Call OpenRouter chat completions endpoint
-    url = os.environ.get('OPENROUTER_URL', 'https://api.openrouter.ai/v1/chat/completions')
-    model = os.environ.get('OPENROUTER_MODEL', 'gpt-4o-mini')
+    url = os.environ.get('OPENROUTER_URL', 'https://openrouter.ai/api/v1/chat/completions')
+    model = os.environ.get('OPENROUTER_MODEL', 'meta-llama/llama-3.3-8b-instruct:free')
 
     payload = {
         "model": model,
