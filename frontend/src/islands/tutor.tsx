@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client'
-import React, { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import axios from 'axios'
 import Editor from '@monaco-editor/react'
 
@@ -17,31 +17,13 @@ function uid(prefix = ''): string {
   return prefix + Math.random().toString(36).slice(2, 9)
 }
 
-function generateInitialQuestion(code: string, language: string): string {
-  const lines = code.trim().split('\n').filter(Boolean)
-  if (!code.trim()) return 'Please paste a code snippet. What is the apparent purpose of this code?'
-  if (lines.length === 1) return 'This looks like a short snippet — what do you think it does?'
-  if (/return\b/.test(code)) return 'What does the return value represent in this code?'
-  if (/for\b|while\b/.test(code)) return 'Can you explain the loop in this code? What is it iterating over?'
-  return 'What do you think is the main responsibility of this code?'
-}
-
-function generateFollowUp(userText: string, code: string): string {
-  const t = userText.toLowerCase()
-  if (t.includes('error') || t.includes('bug') || t.includes('wrong')) {
-    return 'What part of the code makes you suspect an error or bug?'
-  }
-  if (t.includes('return') || t.includes('output')) {
-    return 'How does the code compute its return value or output? Can you trace the path?'
-  }
-  if (t.includes('loop') || t.includes('for') || t.includes('while')) {
-    return 'What would happen if the loop iterates one extra time? How would that affect state?'
-  }
-  // Generic prompting: push the student to reason about inputs/outputs and invariants
-  return 'What assumptions does this code make about its inputs or environment?'
-}
-
-function ChatPanel({ code }: { code: string }) {
+function ChatPanel({
+  code,
+  language,
+}: {
+  code: string
+  language: string
+}) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState<string>('')
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -79,11 +61,20 @@ function ChatPanel({ code }: { code: string }) {
     try {
       const resp = await axios.post('/api/socratic', {
         code,
-        language: 'cpp',
+        language,
         history: [],
       })
-      const reply = resp.data?.reply || 'Sorry, no reply.'
-      pushMessage('tutor', reply)
+      const reply = resp.data?.reply
+      const error = resp.data?.error
+      const message = resp.data?.message
+
+      if (reply) {
+        pushMessage('tutor', reply)
+      } else if (error === 'socratic_policy') {
+        pushMessage('tutor', 'The tutor tried to answer directly. Please try again to get a guiding question.')
+      } else {
+        pushMessage('tutor', message || 'Sorry, no reply.')
+      }
     } catch (e) {
       pushMessage('tutor', 'Error: failed to contact tutor service.')
     }
@@ -98,69 +89,78 @@ function ChatPanel({ code }: { code: string }) {
   }
 
   async function handleSend() {
-    const text = input.trim()
-    if (!text) return
-    pushMessage('user', text)
-    setInput('')
+      const text = input.trim()
+      if (!text) return
+      pushMessage('user', text)
+      setInput('')
 
-    // call backend Socratic API
-    try {
-      // build short history mapping to API format
-      const historyForApi = messages.map((m) => ({ role: m.role === 'tutor' ? 'assistant' : 'user', text: m.text }))
-      const resp = await axios.post('/api/socratic', {
-        code,
-        language,
-        history: historyForApi,
-      })
-      const reply = resp.data?.reply || 'Sorry, the tutor did not respond.'
-      pushMessage('tutor', reply)
-    } catch (e) {
-      pushMessage('tutor', 'Error: failed to contact tutor service.')
+      // call backend Socratic API
+      try {
+        // build short history mapping to API format
+        const historyForApi = messages.map((m) => ({ role: m.role === 'tutor' ? 'assistant' : 'user', text: m.text }))
+        const resp = await axios.post('/api/socratic', {
+          code,
+          language,
+          history: historyForApi,
+        })
+        const reply = resp.data?.reply
+        const error = resp.data?.error
+        const message = resp.data?.message
+
+        if (reply) {
+          pushMessage('tutor', reply)
+        } else if (error === 'socratic_policy') {
+          pushMessage('tutor', 'The tutor tried to answer directly. Please try again to get a guiding question.')
+        } else {
+          pushMessage('tutor', message || 'Sorry, the tutor did not respond.')
+        }
+      } catch (e) {
+        pushMessage('tutor', 'Error: failed to contact tutor service.')
+      }
     }
-  }
 
-  return (
-    <>
-      <div ref={containerRef} className="flex-1 overflow-auto mb-3 p-2 border border-gray-50 rounded bg-gray-50">
-        {messages.length === 0 ? (
-          <div className="text-sm text-gray-600">No conversation yet. Click "Start" to begin.</div>
-        ) : (
-          <div className="space-y-3">
-            {messages.map((m) => (
-              <div key={m.id} className={m.role === 'tutor' ? 'text-left' : 'text-right'}>
-                <div
-                  className={`inline-block px-3 py-2 rounded-md text-sm ${
-                    m.role === 'tutor' ? 'bg-indigo-50 text-indigo-800' : 'bg-gray-100 text-gray-900'
-                  }`}
-                >
-                  {m.text}
+    return (
+      <>
+        <div ref={containerRef} className="flex-1 overflow-auto mb-3 p-2 border border-gray-50 rounded bg-gray-50">
+          {messages.length === 0 ? (
+            <div className="text-sm text-gray-600">No conversation yet. Click "Start" to begin.</div>
+          ) : (
+            <div className="space-y-3">
+              {messages.map((m) => (
+                <div key={m.id} className={m.role === 'tutor' ? 'text-left' : 'text-right'}>
+                  <div
+                    className={`inline-block px-3 py-2 rounded-md text-sm ${
+                      m.role === 'tutor' ? 'bg-indigo-50 text-indigo-800' : 'bg-gray-100 text-gray-900'
+                    }`}
+                  >
+                    {m.text}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="flex items-center gap-2">
-        <button onClick={handleStart} className="px-4 py-2 bg-indigo-600 text-white rounded text-sm hover:bg-indigo-500">Start</button>
-        <button onClick={handleReset} className="px-3 py-2 border rounded text-sm text-gray-600">Reset</button>
-
-        <div className="flex-1 flex items-center ml-2 gap-2">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleSend() }}
-            placeholder="Your reply to the tutor..."
-            className="flex-1 rounded border-gray-200 p-2 text-sm"
-          />
-          <button onClick={handleSend} className="px-3 py-2 bg-green-600 text-white rounded text-sm">Send</button>
+              ))}
+            </div>
+          )}
         </div>
 
-        <div className="ml-auto text-xs text-gray-400">Local-only for now</div>
-      </div>
-    </>
-  )
-}
+        <div className="flex items-center gap-2">
+          <button onClick={handleStart} className="px-4 py-2 bg-indigo-600 text-white rounded text-sm hover:bg-indigo-500">Start</button>
+          <button onClick={handleReset} className="px-3 py-2 border rounded text-sm text-gray-600">Reset</button>
+
+          <div className="flex-1 flex items-center ml-2 gap-2">
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleSend() }}
+              placeholder="Your reply to the tutor..."
+              className="flex-1 rounded border-gray-200 p-2 text-sm"
+            />
+            <button onClick={handleSend} className="px-3 py-2 bg-green-600 text-white rounded text-sm">Send</button>
+          </div>
+
+          <div className="ml-auto text-xs text-gray-400">Local-only for now</div>
+        </div>
+      </>
+    )
+  }
 
 
 function TutorIslandComponent() {
@@ -242,9 +242,7 @@ function TutorIslandComponent() {
           {/* Chat state and UI */}
           <ChatPanel
             code={code}
-            onGenerateQuestion={(q) => {
-              /* no-op; placeholder to allow future hooks */
-            }}
+            language={language}
           />
         </aside>
       </div>

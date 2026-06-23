@@ -5,6 +5,7 @@ Proxies requests to OpenRouter and enforces a Socratic-only system prompt.
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from flask import Blueprint, jsonify, request
 import httpx
 
@@ -52,7 +53,7 @@ def socratic_api():  # type: ignore[no-untyped-def]
     )
 
     # Build messages for chat completion
-    messages = [
+    messages: list[dict[str, object]] = [
         {"role": "system", "content": system_prompt},
     ]
 
@@ -88,25 +89,67 @@ def socratic_api():  # type: ignore[no-untyped-def]
         'Content-Type': 'application/json'
     }
 
-    try:
+    def extract_reply(body: dict[str, object]) -> str:
+        choices = body.get('choices') or []
+        if choices and isinstance(choices, list):
+            first = choices[0]
+            if not isinstance(first, dict):
+                return ''
+            message = first.get('message') or first.get('delta') or {}
+            if not isinstance(message, dict):
+                return ''
+            text = message.get('content') or message.get('message') or ''
+            if not isinstance(text, str):
+                text = ''
+            if not text:
+                candidate = first.get('text')
+                text = candidate if isinstance(candidate, str) else ''
+            return text or ''
+        return ''
+
+    def is_socratic_question(text: str) -> bool:
+        if not text or '?' not in text:
+            return False
+        stripped = text.strip()
+        if not stripped.endswith('?') and not stripped.endswith('?"') and not stripped.endswith("?'"):
+            return False
+        lower = stripped.lower()
+        bad_phrases = [
+            'the answer', 'you should', 'you need to', 'because', 'here is', 'in this code',
+            'to fix', 'you can', 'use the', 'this means', 'the bug', 'the result', 'it will',
+            'it is', 'don\'t', 'do not', 'I think', 'I would', 'I suggest', 'You should'
+        ]
+        return not any(phrase in lower for phrase in bad_phrases)
+
+    def call_openrouter(messages_to_send: Sequence[dict[str, object]]) -> str:
         with httpx.Client(timeout=30.0) as client:
-            resp = client.post(url, json=payload, headers=headers)
+            resp = client.post(url, json={**payload, 'messages': messages_to_send}, headers=headers)
             resp.raise_for_status()
             body = resp.json()
+            if not isinstance(body, dict):
+                return ''
+            return extract_reply(body)
 
-            # OpenRouter response format: look for choices[0].message.content
-            choices = body.get('choices') or []
-            if choices and isinstance(choices, list):
-                first = choices[0]
-                message = first.get('message') or first.get('delta') or {}
-                text = message.get('content') or message.get('message') or ''
-            else:
-                text = ''
+    try:
+        reply = call_openrouter(messages)
 
-            # Fallback: some providers include content in .choices[0].text
-            if not text:
-                text = (choices[0].get('text') if choices else '') or ''
+        if not is_socratic_question(reply):
+            retry_prompt = {
+                'role': 'user',
+                'content': (
+                    'The prior response did not follow the Socratic rule. Respond with a single guiding question only, '
+                    'no direct answers, no explanations, and no code.'
+                ),
+            }
+            retry_messages = messages + [retry_prompt]
+            reply = call_openrouter(retry_messages)
 
-            return jsonify({'reply': text})
+            if not is_socratic_question(reply):
+                return jsonify({
+                    'error': 'socratic_policy',
+                    'message': 'The tutor failed to stay Socratic. Please try again.'
+                }), 502
+
+        return jsonify({'reply': reply})
     except httpx.HTTPError as exc:
         return jsonify({'error': 'Upstream request failed', 'details': str(exc)}), 502
