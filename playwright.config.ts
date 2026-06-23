@@ -1,7 +1,15 @@
-import { defineConfig } from '@playwright/test';
+import { defineConfig, devices } from '@playwright/test';
 
+/**
+ * Playwright configuration for E2E tests.
+ *
+ * Explicitly scoped to e2e/ directory to avoid conflicts with Vitest
+ * configured in frontend/ (which has globals: true).
+ */
 export default defineConfig({
   testDir: './e2e',
+  testMatch: '**/*.spec.ts',
+  testIgnore: '**/node_modules/**',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
@@ -18,7 +26,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { browserName: 'chromium' },
+      use: { ...devices['Desktop Chrome'] },
     },
   ],
 

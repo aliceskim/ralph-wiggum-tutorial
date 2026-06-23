@@ -5,6 +5,9 @@ import path from 'path'
 /**
  * Vitest configuration for React component testing.
  *
+ * Scoped to frontend/tests only to avoid conflicts with Playwright E2E tests
+ * in e2e/ folder at the project root.
+ *
  * Uses jsdom to simulate browser environment.
  * Path aliases match vite.config.ts for consistency.
  */
@@ -14,6 +17,8 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./tests/setup.ts'],
+    include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
+    exclude: ['node_modules', 'dist', '../e2e'],
   },
   resolve: {
     alias: {
